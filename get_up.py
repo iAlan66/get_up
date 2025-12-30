@@ -7,7 +7,9 @@ TIMEZONE = "Asia/Shanghai"
 SENTENCE_API = "https://v1.jinrishici.com/all"
 DEFAULT_SENTENCE = "赏花归去马如飞\r\n去马如飞酒力微\r\n酒力微醒时已暮\r\n醒时已暮赏花归\r\n"
 
-GET_UP_MESSAGE_TEMPLATE = """今天的起床时间是--{get_up_time}。
+GET_UP_MESSAGE_TEMPLATE = """#moring
+
+今天的起床时间是--{get_up_time}。
 
 起床啦。
 
