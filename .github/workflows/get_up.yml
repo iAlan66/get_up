@@ -1,0 +1,22 @@
+name: Get Up to Memos
+
+on:
+  workflow_dispatch:
+
+jobs:
+  get_up:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Run get_up script
+        env:
+          MEMOS_URL: ${{ secrets.MEMOS_URL }}
+          MEMOS_TOKEN: ${{ secrets.MEMOS_TOKEN }}
+        run: uv run get_up.py
