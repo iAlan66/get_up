@@ -2,6 +2,10 @@ name: Get Up to Memos
 
 on:
   workflow_dispatch:
+    inputs:
+      message:
+        description: "输入要处理的消息"
+        required: false
 
 jobs:
   get_up:
@@ -14,6 +18,7 @@ jobs:
         uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
+          python-version: '3.13'
 
       - name: Run get_up script
         env:
