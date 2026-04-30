@@ -1,5 +1,6 @@
 import os
 import random
+from datetime import datetime
 
 import requests
 import pendulum
@@ -7,6 +8,13 @@ from zhconv import convert
 
 # Configuration
 TIMEZONE = "Asia/Shanghai"
+
+# Blog configuration
+BLOG_HISTORY_START_YEAR = 2005
+BLOG_HISTORY_END_YEAR = 2025
+BLOG_RANDOM_SEARCH_ATTEMPTS = 5
+BLOG_LINK_CHECK_ATTEMPTS = 10
+BLOG_RANDOM_SALT = 99
 # 使用 v2 API 获取完整诗词
 SENTENCE_API = "https://v2.jinrishici.com/one.json"
 
@@ -41,6 +49,8 @@ GET_UP_MESSAGE_TEMPLATE = """今天的起床时间是--{get_up_time}。
 {year_progress}
 
 {history_today}
+
+{blog_article}
 
 今天的一句诗:
 
@@ -189,6 +199,139 @@ def get_history_today(limit=3):
         # 返回随机的有趣内容作为备用
         return random.choice(FALLBACK_INTERESTING_FACTS)
 
+# --- Blog helper functions ---
+
+def _check_link_available(url, timeout=10):
+    if not url:
+        return False
+    try:
+        response = requests.head(url, timeout=timeout, allow_redirects=True)
+        return 200 <= response.status_code < 300
+    except requests.exceptions.RequestException:
+        return False
+
+def _daily_rng(now, salt=0):
+    day_seed = now.year * 1000 + now.day_of_year + salt
+    return random.Random(day_seed)
+
+def _saveweb_api_url(date_str):
+    return (
+        "https://search-api.saveweb.org/api/search"
+        f"?q=(date%20%3D%20sec({date_str}))&f=false&p=0&h=true"
+    )
+
+def _fetch_saveweb_articles(year, month, day):
+    date_str = f"{year}-{month}-{day}"
+    response = requests.get(_saveweb_api_url(date_str), timeout=10)
+    if not response.ok:
+        return []
+    articles = []
+    for hit in response.json().get("hits", []):
+        link = hit.get("link", "")
+        if not link:
+            continue
+        articles.append(dict(hit))
+    return articles
+
+def _collect_today_articles(month, day):
+    all_articles = []
+    for year in range(BLOG_HISTORY_START_YEAR, BLOG_HISTORY_END_YEAR + 1):
+        try:
+            all_articles.extend(_fetch_saveweb_articles(year, month, day))
+        except Exception as error:
+            print(f"Error fetching articles for {year}-{month}-{day}: {error}")
+    return all_articles
+
+def _collect_random_articles(now):
+    rng = _daily_rng(now, BLOG_RANDOM_SALT)
+    for _ in range(BLOG_RANDOM_SEARCH_ATTEMPTS):
+        try:
+            random_year = rng.randint(BLOG_HISTORY_START_YEAR, BLOG_HISTORY_END_YEAR)
+            random_month = rng.randint(1, 12)
+            random_day = rng.randint(1, 28)
+            articles = _fetch_saveweb_articles(random_year, random_month, random_day)
+            if articles:
+                return articles
+        except Exception:
+            continue
+    return []
+
+def _pick_random_candidate(candidates, rng):
+    index = rng.randrange(len(candidates))
+    return candidates.pop(index)
+
+def _select_blog_article(all_articles, now):
+    rng = _daily_rng(now)
+    remaining = list(all_articles)
+    checked = []
+
+    for _ in range(min(BLOG_LINK_CHECK_ATTEMPTS, len(all_articles))):
+        if not remaining:
+            break
+        candidate = _pick_random_candidate(remaining, rng)
+        link = candidate.get("link", "")
+        if link and _check_link_available(link):
+            return candidate
+        checked.append(candidate)
+
+    if checked:
+        return checked[0]
+    return None
+
+def _get_article_date(selected):
+    ts = selected.get("date", "") or selected.get("timestamp", "")
+    if not ts:
+        return ""
+    try:
+        return datetime.fromtimestamp(int(ts)).strftime("%Y-%m-%d")
+    except (ValueError, OSError):
+        return str(ts)
+
+def _get_years_ago(article_date, current_year):
+    if not article_date:
+        return None
+    try:
+        year = int(article_date[:4])
+        return current_year - year
+    except (ValueError, IndexError):
+        return None
+
+def _format_blog_article(selected, current_year):
+    title = selected.get("title", "未知标题")
+    link = selected.get("link", "")
+    article_date = _get_article_date(selected)
+    years_ago = _get_years_ago(article_date, current_year)
+
+    if years_ago is not None and years_ago >= 0:
+        header = f"**来自 {years_ago} 年前的博客** ({article_date})"
+    else:
+        header = "**历史上的博客**"
+
+    if link:
+        return f"{header}：[{title}]({link})"
+    return f"{header}：{title}"
+
+def get_blog_article_from_history():
+    """获取随机历史博客文章"""
+    try:
+        now = pendulum.now(TIMEZONE)
+        all_articles = _collect_today_articles(now.month, now.day)
+
+        if not all_articles:
+            print("No articles found for today, trying random date...")
+            all_articles = _collect_random_articles(now)
+        if not all_articles:
+            return ""
+
+        selected = _select_blog_article(all_articles, now)
+        if not selected:
+            return ""
+
+        return _format_blog_article(selected, now.year)
+    except Exception as error:
+        print(f"Error getting blog article: {error}")
+        return ""
+
 def post_to_memos(content):
     memos_url = os.getenv("MEMOS_URL")
     memos_token = os.getenv("MEMOS_TOKEN")
@@ -224,6 +367,7 @@ def main():
     day_of_year = get_day_of_year()
     year_progress = get_year_progress()
     history_today = get_history_today()
+    blog_article = get_blog_article_from_history()
 
     body = GET_UP_MESSAGE_TEMPLATE.format(
         get_up_time=get_up_time,
@@ -231,6 +375,7 @@ def main():
         day_of_year=day_of_year,
         year_progress=year_progress,
         history_today=history_today,
+        blog_article=blog_article,
     )
 
     print("Generated Message:")
